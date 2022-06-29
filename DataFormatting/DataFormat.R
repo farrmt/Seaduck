@@ -2,39 +2,14 @@
 #Points that lie on the beginning or end of transects (ex/ 2016, ID: 566)
 #Check for mismatch in gps locations
 #Check for mismatch in times
-#Force st_intersect with corresponding transect ID
+#Force st_intersect with corresponding transect ID (make sure points are assigned to proper transect... maybe st_distance)
+#Add Basin Information (let it vary at site level?)
 
 #-Libraries-#
 library(sf)
 library(tidyverse)
 
 #-Functions-#
-# transect.fun <- function(geom, att, site.length = 1000){
-#   tran.length <- as.numeric(st_length(geom)) #Transect length
-#   n.gps_points <- lengths(geom)/2 #Number of GPS points along transect
-#   n.gps_segments <- n.gps_points-1 #Number of GPS segments
-#   gps_seg.length <- tran.length/n.gps_segments #Length of GPS segments
-#   n.gps_seg_per_site <- ceiling(site.length/gps_seg.length) #Number of GPS segments per site
-#   e.site.length <- n.gps_seg_per_site * gps_seg.length
-#   n.sites <- ceiling(tran.length/e.site.length)
-#   
-#   n.trans <- round(n.units/units)
-#   n.trans[n.trans == 0] <- 1
-#   n.trans[obj.length - (obj.length/n.units)*n.trans < 500 & n.trans != 1] <- n.trans[obj.length - (obj.length/n.units)*n.trans < 500 & n.trans != 1] - 1
-#   df <- att[rep(1:nrow(att), times = n.trans), ]
-#   df$segID <- unlist(mapply(seq, 1, n.trans))
-#   df$tranID <- as.numeric(as.factor(df$TransectID))
-#   #df$begin <- (units[df$tranID] * (df$segID-1)) + 1
-#   df$begin <- unlist(mapply(seq, 1, units * n.trans, units))
-#   #df$end <- (units[df$tranID] * df$segID)
-#   df$end <- unlist(mapply(seq, 1 + units, units * n.trans + 1, units))
-#   df$end[(df$end != n.units[df$tranID]) & (df$segID == n.trans[df$tranID])] <- n.units[df$tranID[(df$end != n.units[df$tranID]) & (df$segID == n.trans[df$tranID])]]
-#   return(df)
-# }
-# 
-# coords.fun <- function(x,y,z){
-#   return(st_sfc(st_linestring(as.matrix(coords[coords$L1 == x & coords$ID >= y & coords$ID <= z,1:2]))))
-# }
 
 skip.fun <- function(flags = flags){
   flags <- tryCatch(
@@ -162,7 +137,6 @@ site.fun <- function(obj, site.length = 1000){
   return(site)
 }
 
-
 #-Directory-#
 dsn <- "/Users/farrm/OneDrive - UW/Projects/Seaduck/Data/MidwinterAerialSeabirdSurveys/MidwinterAerialSeabirdSurveys.gdb"
 
@@ -176,6 +150,8 @@ for(i in 1:length(layer.names)){
 }
 
 #-Species information-#
+
+#Common name of sea ducks
 commonnames <- c("Red-breasted merganser", 
                  "Common merganser",
                  "Hooded merganser",
@@ -189,6 +165,7 @@ commonnames <- c("Red-breasted merganser",
                  "Long-tailed duck"
 ) 
 
+#Extract species codes
 sppcodes <- Species$PSEMP_SpeciesCode[Species$TaxoCommonName %in% commonnames]
 
 #-Observation data-#
@@ -223,17 +200,19 @@ year <- PSEMP_SurveyRoutes %>%
 
 nyears <- length(year)
 
-#nsite <- 1
-
-
 #-Basin information-#
 basin.data <- PSEMP_Analysis_Strata %>%
   st_zm(., drop = TRUE) %>%
   st_transform(., crs = st_crs("EPSG:26910")) %>%
   st_cast(., "MULTIPOLYGON") %>%
+  st_make_valid(.) %>%
   group_by(Basin) %>%
-  summarize(Shape = st_combine(Shape)) %>%
+  summarise(Shape = st_union(Shape)) %>%
+
+  #summarize(Shape = st_combine(Shape)) %>%
   mutate(Shape_Area = units::set_units(st_area(.), km^2))
+
+  
 
 transect.data <- obs.data <- data.frame()
 
@@ -244,6 +223,14 @@ for(t in 9:nyears){
     st_transform(., crs = st_crs("EPSG:26910")) %>%
     st_cast(., "LINESTRING") %>%
     mutate(Shape_Length = st_length(.))
+  
+  obj$Basin <- obj %>% st_buffer(., dist = 88, endCapStyle = "FLAT") %>%
+    st_intersection(., basin.data) %>% 
+    mutate(Shape_Area = st_area(.)) %>% 
+    arrange(TransectID, -Shape_Area) %>% 
+    filter(duplicated(TransectID) == F) %>% 
+    select(Basin) %>% .$Basin
+  
   
   #data <- transect.fun(st_geometry(obj), st_drop_geometry(obj))
   #coords <- data.frame(st_coordinates(st_geometry(obj))) %>% group_by(L1) %>% mutate(ID = seq(1:(n())))
@@ -261,6 +248,12 @@ for(t in 9:nyears){
   #nsite <- nsite + dim(data)[1]
   
   data$siteID <- 1:dim(data)[1]
+  
+  # data$basin <- st_intersection(data, basin.data) %>% 
+  #   mutate(Shape_Area = st_area(.)) %>% 
+  #   arrange(siteID, -Shape_Area) %>% 
+  #   #filter(duplicated(siteID) == F) %>% 
+  #   select(Basin) %>% .$Basin
   
   transect.data <- rbind(transect.data, data)
   
