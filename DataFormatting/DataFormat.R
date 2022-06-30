@@ -3,7 +3,8 @@
 #Check for mismatch in gps locations
 #Check for mismatch in times
 #Force st_intersect with corresponding transect ID (make sure points are assigned to proper transect... maybe st_distance)
-#Add Basin Information (let it vary at site level?)
+#Add Basin Information (let it vary at site level; deal with transect outside of basin area [maybe estuaries, ex/ 1997, ID: 421, 768])
+#Bald eagle data (Code: BAEA)
 
 #-Libraries-#
 library(sf)
@@ -200,7 +201,7 @@ year <- PSEMP_SurveyRoutes %>%
 
 nyears <- length(year)
 
-#-Basin information-#
+#Basin information
 basin.data <- PSEMP_Analysis_Strata %>%
   st_zm(., drop = TRUE) %>%
   st_transform(., crs = st_crs("EPSG:26910")) %>%
@@ -208,15 +209,13 @@ basin.data <- PSEMP_Analysis_Strata %>%
   st_make_valid(.) %>%
   group_by(Basin) %>%
   summarise(Shape = st_union(Shape)) %>%
-
-  #summarize(Shape = st_combine(Shape)) %>%
   mutate(Shape_Area = units::set_units(st_area(.), km^2))
 
   
-
+#Initiate transect and observation data objects
 transect.data <- obs.data <- data.frame()
 
-for(t in 9:nyears){
+for(t in 1:nyears){
   obj <- PSEMP_SurveyRoutes %>%
     st_zm(., drop = TRUE) %>%
     filter(SurveyYear== year[t]) %>%
@@ -224,13 +223,16 @@ for(t in 9:nyears){
     st_cast(., "LINESTRING") %>%
     mutate(Shape_Length = st_length(.))
   
-  obj$Basin <- obj %>% st_buffer(., dist = 88, endCapStyle = "FLAT") %>%
-    st_intersection(., basin.data) %>% 
-    mutate(Shape_Area = st_area(.)) %>% 
-    arrange(TransectID, -Shape_Area) %>% 
-    filter(duplicated(TransectID) == F) %>% 
-    select(Basin) %>% .$Basin
-  
+  obj <- obj %>% st_buffer(., dist = 88, endCapStyle = "FLAT") %>%
+    st_intersection(., basin.data) %>%
+    mutate(Shape_Area = st_area(.)) %>%
+    arrange(TransectID, -Shape_Area) %>%
+    filter(duplicated(TransectID) == F) %>%
+    st_drop_geometry(.) %>%
+    right_join(., obj, by = c("TransectID", "LAST_DateTime", "FirstDateTime", "TransectCode",
+                              "SurveyYear", "Shape_Length")) %>%
+    select(-Shape_Area) %>%
+    st_set_geometry(., value = "Shape")
   
   #data <- transect.fun(st_geometry(obj), st_drop_geometry(obj))
   #coords <- data.frame(st_coordinates(st_geometry(obj))) %>% group_by(L1) %>% mutate(ID = seq(1:(n())))
@@ -267,9 +269,9 @@ for(t in 9:nyears){
   obj <- obj %>%
     left_join(., data %>%
                st_drop_geometry(.) %>%
-               select("SurveyYear", "TransectID", "tran.segID", "siteID"),
+               select("SurveyYear", "TransectID", "tran.segID", "siteID", "Basin"),
                by = c("SurveyYear", "TransectID", "tran.segID")) %>%
-               select(-"tran.segID")
+    select(-"tran.segID")
   
 
   
@@ -295,21 +297,25 @@ for(t in 9:nyears){
   
 }
 
-obs.data <- obs.data %>% drop_na(siteID)
-obs.num <- obs.data %>% st_drop_geometry(.) %>%
-  select(SurveyYear, siteID, PSEMP_SpeciesCode, ObservationCount) %>%
-  rename(year = SurveyYear, site = siteID, species = PSEMP_SpeciesCode, count = ObservationCount) %>%
+obs.data <- obs.data %>% drop_na(siteID) %>% drop_na(Basin)
+obs.num <- obs.data %>% #st_drop_geometry(.) %>%
+  select(SurveyYear, siteID, Basin, Species, Count) %>%
+  rename(year = SurveyYear, site = siteID, basin = Basin, species = Species, count = Count) %>%
   mutate(year = as.numeric(factor(year)),
-         species = as.numeric(factor(species)))
+         species = as.numeric(factor(species)),
+         basin = as.numeric(as.factor(basin)))
 
 nsites <- transect.data %>% st_drop_geometry(.) %>% group_by(SurveyYear) %>% summarise(nsite = n()) %>% .$nsite
 
+#Observation array
 obs.array <- array(data = NA, dim = c(length(sppcodes), nyears, max(nsites)))
 
+#Set abundances to zero
 for(t in 1:7){
   obs.array[,t,1:nsites[t]] <- 0
 }
 
+#Add observed counts
 for(i in 1:dim(obs.num)[1]){
   obs.array[obs.num$species[i], obs.num$year[i], obs.num$site[i]] <- obs.num$count[i]
 }
