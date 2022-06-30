@@ -5,6 +5,7 @@
 #Force st_intersect with corresponding transect ID (make sure points are assigned to proper transect... maybe st_distance)
 #Add Basin Information (let it vary at site level; deal with transect outside of basin area [maybe estuaries, ex/ 1997, ID: 421, 768])
 #Bald eagle data (Code: BAEA)
+#2015 data seems to be doubled
 
 #-Libraries-#
 library(sf)
@@ -219,6 +220,7 @@ for(t in 1:nyears){
   obj <- PSEMP_SurveyRoutes %>%
     st_zm(., drop = TRUE) %>%
     filter(SurveyYear== year[t]) %>%
+    filter(duplicated(TransectID) == F) %>%
     st_transform(., crs = st_crs("EPSG:26910")) %>%
     st_cast(., "LINESTRING") %>%
     mutate(Shape_Length = st_length(.))
@@ -297,6 +299,9 @@ for(t in 1:nyears){
   
 }
 
+transect.data <- transect.data %>% mutate(Basin = as.numeric(as.factor(Basin)),
+                                          SurveyYear = as.numeric(as.factor(SurveyYear)))
+
 obs.data <- obs.data %>% drop_na(siteID) %>% drop_na(Basin)
 obs.num <- obs.data %>% #st_drop_geometry(.) %>%
   select(SurveyYear, siteID, Basin, Species, Count) %>%
@@ -307,7 +312,7 @@ obs.num <- obs.data %>% #st_drop_geometry(.) %>%
 
 nsites <- transect.data %>% st_drop_geometry(.) %>% group_by(SurveyYear) %>% summarise(nsite = n()) %>% .$nsite
 
-#Observation array
+#-Observation data-#
 obs.array <- array(data = NA, dim = c(length(sppcodes), nyears, max(nsites)))
 
 #Set abundances to zero
@@ -320,9 +325,33 @@ for(i in 1:dim(obs.num)[1]){
   obs.array[obs.num$species[i], obs.num$year[i], obs.num$site[i]] <- obs.num$count[i]
 }
 
-data.list <- list(n = obs.array[,1:7,], N = apply(obs.array[,1:7,], MARGIN = c(1,2), sum, na.rm = T))
+
+#-Covariate data-#
+
+#Basin ID
+basin <- array(data = NA, dim = c(nyears, max(nsites)))
+
+#Area sampled per site
+area <- array(data = NA, dim = c(nyears, max(nsites)))
+
+for(i in 1:dim(transect.data)[1]){
+  t <- transect.data$SurveyYear[i]
+  j <- transect.data$siteID[i]
+  basin[t,j] <- transect.data$Basin[i]
+  area[t,j] <- as.numeric(transect.data$Shape_Area[i])
+}
+
+nbasins <- max(basin, na.rm = T)
+
+area <- area/mean(area, na.rm = T)
+
+#Effort per year
+effort <- nsites/mean(nsites) #MTF: should this be the median?
+
+data.list <- list(n = obs.array, N = apply(obs.array, MARGIN = c(1,2), sum, na.rm = T))
                   
-con.list <- list(nspecies = 11, nyears = 7, nsites = nsites)
+con.list <- list(nspecies = length(sppcodes), nyears = nyears, nsites = nsites, nbasins = nbasins,
+                 basin = basin, area = area, effort = effort)
 
 save(data.list, file = "./DataFormatting/FormattedData.Rds")
 save(con.list, file = "./DataFormatting/FormattedCon.Rds")
