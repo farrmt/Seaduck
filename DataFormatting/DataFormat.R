@@ -190,6 +190,8 @@ observation.data <- rbind(st_as_sf(observation.data %>% filter(SurveyYear < 2012
                              st_transform(., crs = st_crs("EPSG:26910")))
 #observation.data <- st_transform(observation.data, crs = st_crs("EPSG:2927"))
 #observation.data <- st_transform(observation.data, crs = st_crs("EPSG:26910"))
+
+observation.data$Species <- recode(observation.data$Species, OLDS = "LTDU")
 observation.data <- observation.data %>% filter(Species %in% sppcodes)
 
 #-Segment transects-#
@@ -302,6 +304,8 @@ for(t in 1:nyears){
 transect.data <- transect.data %>% mutate(Basin = as.numeric(as.factor(Basin)),
                                           SurveyYear = as.numeric(as.factor(SurveyYear)))
 
+transect.data <- transect.data %>% drop_na(Basin)
+
 obs.data <- obs.data %>% drop_na(siteID) %>% drop_na(Basin)
 obs.num <- obs.data %>% #st_drop_geometry(.) %>%
   select(SurveyYear, siteID, Basin, Species, Count) %>%
@@ -316,7 +320,7 @@ nsites <- transect.data %>% st_drop_geometry(.) %>% group_by(SurveyYear) %>% sum
 obs.array <- array(data = NA, dim = c(length(sppcodes), nyears, max(nsites)))
 
 #Set abundances to zero
-for(t in 1:7){
+for(t in 1:nyears){
   obs.array[,t,1:nsites[t]] <- 0
 }
 
