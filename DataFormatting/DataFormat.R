@@ -151,6 +151,8 @@ for(i in 1:length(layer.names)){
   rm(object)
 }
 
+
+
 #-Species information-#
 
 #Common name of sea ducks
@@ -214,7 +216,14 @@ basin.data <- PSEMP_Analysis_Strata %>%
   summarise(Shape = st_union(Shape)) %>%
   mutate(Shape_Area = units::set_units(st_area(.), km^2))
 
-  
+#-EPA grid-#
+grid <- st_read("/Users/farrm/OneDrive - UW/Projects/Seaduck/Data/EPA40kmHexagons/EPA_Hexagons_40km/EPA_Hexagons_40km.shp")
+grid <- st_transform(grid, crs = st_crs("EPSG:26910"))
+grid <- st_crop(grid, st_bbox(basin.data %>% summarise(Shape = st_union(Shape)) %>% st_buffer(., dist = 15000)))
+#grid <- st_intersection(grid, basin.data %>% summarise(Shape = st_union(Shape)) %>% st_buffer(., dist = 15000))
+grid %>% mutate(Shape_Area = units::set_units(st_area(.), km^2))
+grid$ID <- seq(1,dim(grid)[1])
+
 #Initiate transect and observation data objects
 transect.data <- obs.data <- data.frame()
 
@@ -261,6 +270,12 @@ for(t in 1:nyears){
   #   #filter(duplicated(siteID) == F) %>% 
   #   select(Basin) %>% .$Basin
   
+  data$hexID <- st_intersection(data, grid) %>% 
+      mutate(Shape_Area = st_area(.)) %>%
+      arrange(siteID, -Shape_Area) %>%
+      filter(duplicated(siteID) == F) %>%
+      select(ID) %>% .$ID
+  
   transect.data <- rbind(transect.data, data)
   
   data$tran.segID <- 1:dim(data)[1]
@@ -302,7 +317,8 @@ for(t in 1:nyears){
 }
 
 transect.data <- transect.data %>% mutate(Basin = as.numeric(as.factor(Basin)),
-                                          SurveyYear = as.numeric(as.factor(SurveyYear)))
+                                          SurveyYear = as.numeric(as.factor(SurveyYear)),
+                                          hexID = as.numeric(as.factor(hexID)))
 
 transect.data <- transect.data %>% drop_na(Basin)
 
@@ -336,13 +352,14 @@ for(i in 1:dim(obs.num)[1]){
 basin <- array(data = NA, dim = c(nyears, max(nsites)))
 
 #Area sampled per site
-area <- array(data = NA, dim = c(nyears, max(nsites)))
+hexagon <- area <- array(data = NA, dim = c(nyears, max(nsites)))
 
 for(i in 1:dim(transect.data)[1]){
   t <- transect.data$SurveyYear[i]
   j <- transect.data$siteID[i]
   basin[t,j] <- transect.data$Basin[i]
   area[t,j] <- as.numeric(transect.data$Shape_Area[i])
+  hexagon[t,j] <- transect.data$hexID[i]
 }
 
 nbasins <- max(basin, na.rm = T)
@@ -355,7 +372,8 @@ effort <- nsites/mean(nsites) #MTF: should this be the median?
 data.list <- list(n = obs.array, N = apply(obs.array, MARGIN = c(1,2), sum, na.rm = T))
                   
 con.list <- list(nspecies = length(sppcodes), nyears = nyears, nsites = nsites, nbasins = nbasins,
-                 basin = basin, area = area, effort = effort)
+                 basin = basin, area = area, effort = effort,
+                 hexagon = hexagon)
 
 save(data.list, file = "./DataFormatting/FormattedData.Rds")
 save(con.list, file = "./DataFormatting/FormattedCon.Rds")
