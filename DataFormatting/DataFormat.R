@@ -1,15 +1,18 @@
 #TODO: 
 #Points that lie on the beginning or end of transects (ex/ 2016, ID: 566)
-#Check for mismatch in gps locations
-#Check for mismatch in times
 #Force st_intersect with corresponding transect ID (make sure points are assigned to proper transect... maybe st_distance)
 #Add Basin Information (let it vary at site level; deal with transect outside of basin area [maybe estuaries, ex/ 1997, ID: 421, 768])
 #Bald eagle data (Code: BAEA)
 #2015 data seems to be doubled
+#Add sum of area by hexagon and year
+#Transect 544 exist but not 545. There are points that exist in transect 545... (1994)
+#Bathemtry data NA -> 0 ... check 
+#Fix how basin is defined. Issues noticed in hexagon.data
 
 #-Libraries-#
 library(sf)
 library(tidyverse)
+library(lubridate)
 
 #-Functions-#
 
@@ -44,7 +47,7 @@ multi.fun <- function(x){
   x <- as.matrix(x)
   x <- st_linestring(x)
   return(x)
-}
+}     
 site.fun <- function(obj, site.length = 1000){
   geom <- st_geometry(obj)
   att <- st_drop_geometry(obj)
@@ -138,6 +141,12 @@ site.fun <- function(obj, site.length = 1000){
   site <- site %>% mutate(Shape_Length = st_length(.))
   return(site)
 }
+site.id.fun <- function(x, y){
+  tmp <- data %>% filter(TransectID == x)
+  siteID <- tmp[min(unlist(st_intersects(y, tmp))), "siteID"]
+  siteID <- st_drop_geometry(siteID)
+  return(siteID)
+}
 
 #-Directory-#
 dsn <- "/Users/farrm/OneDrive - UW/Projects/Seaduck/Data/MidwinterAerialSeabirdSurveys/MidwinterAerialSeabirdSurveys.gdb"
@@ -146,7 +155,7 @@ dsn <- "/Users/farrm/OneDrive - UW/Projects/Seaduck/Data/MidwinterAerialSeabirdS
 layer.names <- st_layers(dsn)$name
 
 for(i in 1:length(layer.names)){
-  object <- st_read(dsn, layer = layer.names[i])
+  object <- with_tz(st_read(dsn, layer.names[i]), "UTC") %>% force_tz("America/Los_Angeles")
   assign(paste(layer.names[i]), object)
   rm(object)
 }
@@ -173,28 +182,28 @@ commonnames <- c("Red-breasted merganser",
 sppcodes <- Species$PSEMP_SpeciesCode[Species$TaxoCommonName %in% commonnames]
 
 #-Observation data-#
-files <- list.files(path = "./PSAMP_MattFarr_Delivery/Data/DataFormattedForStatistics",
-           pattern = "ObsSurvey",
-           full.names = TRUE,
-           recursive = TRUE)
-
-observation.data <- data.frame()
-
-for(i in 1:length(files)){
-  observation.data <- rbind(observation.data, read_csv(file = files[i]) %>%
-                              mutate(SurveyYear = as.numeric(substr(files[i], 59, 62))) %>%
-                              select(Species, Count, TransectID, SurveyYear, DateTime, Lat, Lon))
-}
-
-observation.data <- rbind(st_as_sf(observation.data %>% filter(SurveyYear < 2012), coords = c("Lon", "Lat"), crs = st_crs("EPSG:4267")) %>%
-                             st_transform(., crs = st_crs("EPSG:26910")),
-                           st_as_sf(observation.data %>% filter(SurveyYear >= 2012), coords = c("Lon", "Lat"), crs =st_crs("EPSG:4326")) %>%
-                             st_transform(., crs = st_crs("EPSG:26910")))
-#observation.data <- st_transform(observation.data, crs = st_crs("EPSG:2927"))
-#observation.data <- st_transform(observation.data, crs = st_crs("EPSG:26910"))
-
-observation.data$Species <- recode(observation.data$Species, OLDS = "LTDU")
-observation.data <- observation.data %>% filter(Species %in% sppcodes)
+# files <- list.files(path = "./PSAMP_MattFarr_Delivery/Data/DataFormattedForStatistics",
+#            pattern = "ObsSurvey",
+#            full.names = TRUE,
+#            recursive = TRUE)
+# 
+# observation.data <- data.frame()
+# 
+# for(i in 1:length(files)){
+#   observation.data <- rbind(observation.data, read_csv(file = files[i]) %>%
+#                               mutate(SurveyYear = as.numeric(substr(files[i], 59, 62))) %>%
+#                               select(Species, Count, TransectID, SurveyYear, DateTime, Lat, Lon))
+# }
+# 
+# observation.data <- rbind(st_as_sf(observation.data %>% filter(SurveyYear < 2012), coords = c("Lon", "Lat"), crs = st_crs("EPSG:4267")) %>%
+#                              st_transform(., crs = st_crs("EPSG:26910")),
+#                            st_as_sf(observation.data %>% filter(SurveyYear >= 2012), coords = c("Lon", "Lat"), crs =st_crs("EPSG:4326")) %>%
+#                              st_transform(., crs = st_crs("EPSG:26910")))
+# #observation.data <- st_transform(observation.data, crs = st_crs("EPSG:2927"))
+# #observation.data <- st_transform(observation.data, crs = st_crs("EPSG:26910"))
+# 
+# observation.data$Species <- recode(observation.data$Species, OLDS = "LTDU")
+# observation.data <- observation.data %>% filter(Species %in% sppcodes)
 
 #-Segment transects-#
 
@@ -278,39 +287,44 @@ for(t in 1:nyears){
   
   transect.data <- rbind(transect.data, data)
   
-  data$tran.segID <- 1:dim(data)[1]
+  #data$tran.segID <- 1:dim(data)[1]
   
-  obj <- observation.data %>%
-    filter(SurveyYear == year[t])
-
-  obj$tran.segID <- max.col(st_intersects(obj, data), "first")
-
-  obj <- obj %>%
-    left_join(., data %>%
-               st_drop_geometry(.) %>%
-               select("SurveyYear", "TransectID", "tran.segID", "siteID", "Basin"),
-               by = c("SurveyYear", "TransectID", "tran.segID")) %>%
-    select(-"tran.segID")
-  
-
-  
-
-  # obj <- PSEMP_SurveyObservations %>%
-  #   st_zm(., drop = TRUE) %>%
-  #   filter(SurveyYear== year[t]) %>%
-  #   st_transform(., crs = st_crs("EPSG:26910"))
+  # obj <- observation.data %>%
+  #   filter(SurveyYear == year[t])
   # 
   # obj$tran.segID <- max.col(st_intersects(obj, data), "first")
   # 
   # obj <- obj %>%
-  #   filter(PSEMP_SpeciesCode %in% sppcodes) %>%
   #   left_join(., data %>%
-  #               st_drop_geometry(.) %>%
-  #               select("SurveyYear", "TransectID", "tran.segID", "siteID"),
-  #             by = c("SurveyYear", "TransectID", "tran.segID")) %>%
+  #              st_drop_geometry(.) %>%
+  #              select("SurveyYear", "TransectID", "tran.segID", "siteID", "Basin"),
+  #              by = c("SurveyYear", "TransectID", "tran.segID")) %>%
   #   select(-"tran.segID")
-  # 
-  # observation.data <- rbind(observation.data, obj)
+  
+
+  
+
+  obj <- PSEMP_SurveyObservations %>%
+    st_zm(., drop = TRUE) %>%
+    filter(SurveyYear== year[t]) %>%
+    st_transform(., crs = st_crs("EPSG:26910"))
+
+  #obj$tran.segID <- max.col(st_intersects(obj, data), "first")
+  #obj$siteID <- max.col(st_intersects(obj, data), "first")
+  obj <- obj %>% rowwise() %>% mutate(site.id.fun(TransectID, Shape))
+  
+
+  obj <- obj %>%
+    filter(PSEMP_SpeciesCode %in% sppcodes) %>%
+    left_join(., data %>%
+                st_drop_geometry(.) %>%
+                #select("SurveyYear", "TransectID", "tran.segID", "siteID"),
+                select("SurveyYear", "TransectID", "siteID"),
+              #by = c("SurveyYear", "TransectID", "tran.segID")) %>%
+              by = c("SurveyYear", "TransectID", "siteID")) 
+    #select(-"tran.segID")
+
+  #observation.data <- rbind(observation.data, obj)
   
   obs.data <- rbind(obs.data, obj)
   
@@ -318,17 +332,38 @@ for(t in 1:nyears){
 
 transect.data <- transect.data %>% mutate(Basin = as.numeric(as.factor(Basin)),
                                           SurveyYear = as.numeric(as.factor(SurveyYear)),
-                                          hexID = as.numeric(as.factor(hexID)))
+                                          hex.factor = as.numeric(as.factor(hexID)))
 
 transect.data <- transect.data %>% drop_na(Basin)
 
-obs.data <- obs.data %>% drop_na(siteID) %>% drop_na(Basin)
+#Hexagon data sampled by transects
+hexagon.data <- grid[unique(transect.data$hexID),]
+hexagon.data <- hexagon.data %>% arrange(ID)
+hexagon.data$basin <- apply(table(transect.data$hexID, transect.data$Basin), 1, which.max)
+hexagon.data <- hexagon.data %>% arrange(ID)
+
+st_write(hexagon.data, "./DataFormatting/hexagon.data.shp", delete_layer = T)
+
+nhex <- dim(hexagon.data)[1]
+
+prediction.data <-  st_intersection(hexagon.data, basin.data) %>%
+  mutate(km2 = units::set_units(st_area(.), km^2))
+
+prediction.data <- prediction.data %>% arrange(ID)
+
+st_write(prediction.data, "./DataFormatting/prediction.data.shp", delete_layer = T)
+
+npred <- dim(prediction.data)[1]
+
+obs.data <- obs.data %>% drop_na(siteID) #%>% drop_na(Basin)
 obs.num <- obs.data %>% #st_drop_geometry(.) %>%
-  select(SurveyYear, siteID, Basin, Species, Count) %>%
-  rename(year = SurveyYear, site = siteID, basin = Basin, species = Species, count = Count) %>%
+  #select(SurveyYear, siteID, Basin, Species, Count) %>%
+  select(SurveyYear, siteID, PSEMP_SpeciesCode, ObservationCount) %>%
+  #rename(year = SurveyYear, site = siteID, basin = Basin, species = Species, count = Count) %>%
+  rename(year = SurveyYear, site = siteID, species = PSEMP_SpeciesCode, count = ObservationCount) %>%
   mutate(year = as.numeric(factor(year)),
-         species = as.numeric(factor(species)),
-         basin = as.numeric(as.factor(basin)))
+         species = as.numeric(factor(species)))
+         #basin = as.numeric(as.factor(basin)))
 
 nsites <- transect.data %>% st_drop_geometry(.) %>% group_by(SurveyYear) %>% summarise(nsite = n()) %>% .$nsite
 
@@ -345,35 +380,106 @@ for(i in 1:dim(obs.num)[1]){
   obs.array[obs.num$species[i], obs.num$year[i], obs.num$site[i]] <- obs.num$count[i]
 }
 
-
 #-Covariate data-#
+
+#Pacific Decadal Oscillation
+PDO <- read.table(file = "/Users/farrm/OneDrive - UW/Projects/Seaduck/Data/PDO_data.dat", header = TRUE, skip = 1, fill = T)
+PDO <- reshape2::melt(PDO, id.vars = "Year")
+colnames(PDO) <- c("Year", "Month", "PDO")
+PDO[PDO$Year == "2022" & PDO$Month == "Jul", "PDO"] <- -2.48
+PDO$PDO <- as.numeric(PDO$PDO)
+PDO <- as.data.frame(PDO)
+PDO <- PDO %>% filter(Year > 1992 & Year < 2022) %>% group_by(Year) %>% summarise(Value = mean(PDO, na.rm = T))
+PDO <- (PDO$Value - mean(PDO$Value))/sd(PDO$Value)
+
+#Bathymetry
+bathymetry <- raster::raster("/Users/farrm/OneDrive - UW/Projects/Seaduck/Data/Marine Environmental Layers/Final_EnvLayers/Bathymetry.tif")
+bathymetry <- raster::projectRaster(bathymetry, crs = raster::crs("EPSG:26910"))
+bathymetry <- raster::crop(bathymetry, st_bbox(basin.data %>% summarise(Shape = st_union(Shape)) %>% st_buffer(., dist = 15000)))
+
+depthhex <- as.numeric(hexagon.data %>% mutate(depth = raster::extract(bathymetry, hexagon.data, fun = mean, na.rm = T)) %>% .$depth)
+depthhex[depthhex>0] <- 0
+depthhex <- abs(depthhex)
+depth.hex <- (depthhex - mean(depthhex, na.rm = T))/sd(depthhex, na.rm = T)
+
+depthsite <- as.numeric(transect.data %>% mutate(depth = raster::extract(bathymetry, transect.data, fun = mean, na.rm = T)) %>% .$depth)
+depthsite[is.na(depthsite)] <- 0
+depthsite[depthsite>0] <- 0
+depthsite <- abs(depthsite)
+#depth.site <- (depth.site - mean(depth.site, na.rm = T))/sd(depth.site, na.rm = T)
+
+depthpred <- as.numeric(prediction.data %>% mutate(depth = raster::extract(bathymetry, prediction.data, fun = mean, na.rm = T)) %>% .$depth)
+depthpred[is.na(depthpred)] <- 0
+depthpred[depthpred>0] <- 0
+depthpred <- abs(depthpred)
+#depth.pred <- (depthpred - mean(depthpred, na.rm = T))/sd(depthpred, na.rm = T)
 
 #Basin ID
 basin <- array(data = NA, dim = c(nyears, max(nsites)))
 
 #Area sampled per site
-hexagon <- area <- array(data = NA, dim = c(nyears, max(nsites)))
+depth.site <- hexagon <- area <- array(data = NA, dim = c(nyears, max(nsites)))
 
 for(i in 1:dim(transect.data)[1]){
   t <- transect.data$SurveyYear[i]
   j <- transect.data$siteID[i]
   basin[t,j] <- transect.data$Basin[i]
   area[t,j] <- as.numeric(transect.data$Shape_Area[i])
-  hexagon[t,j] <- transect.data$hexID[i]
+  hexagon[t,j] <- transect.data$hex.factor[i]
+  depth.site[t,j] <- depthsite[i]
 }
+
+depth.pred <- (t(matrix(rep(depthpred, nyears), ncol = nyears)) - matrix(rep(apply(depth.site, MARGIN = 1, mean, na.rm = T), npred), ncol = npred, nrow = nyears))/matrix(rep(apply(depth.site, MARGIN = 1, sd, na.rm = T), npred), ncol = npred, nrow = nyears)
+
+depth.site <- t(scale(t(depth.site)))
 
 nbasins <- max(basin, na.rm = T)
 
+#Change of support
+COS <- prediction.data$km2
+COS <- as.numeric(COS/mean(area, na.rm = T))
+
+#COS2 <- 100 #density per 10 km^2
+
+COS.hex <- hexagon.data$km2
+COS.hex <- as.numeric(COS.hex/mean(area, na.rm = T))
+
+#Site area offset
 area <- area/mean(area, na.rm = T)
+
+#Hexagon area offset
+hex.area.df <- transect.data %>% st_drop_geometry(.) %>% 
+  group_by(SurveyYear, hex.factor) %>% 
+  summarise(hex.area = sum(Shape_Area))
+
+hex.area <- matrix(0, nrow = nyears, ncol = nhex)
+for(i in 1:dim(hex.area.df)[1]){
+  t <- hex.area.df$SurveyYear[i]
+  h <- hex.area.df$hex.factor[i]
+  hex.area[t,h] <- hex.area.df$hex.area[i]
+}
+
+hex.area <- (hex.area - mean(hex.area))/sd(hex.area)
+
+#Basin hexagon ID
+basinhex <- hexagon.data$basin
+
+#Basin prediction ID
+basinpred <- prediction.data$basin
+
+#Hexagon prediction ID
+hexpred <- as.numeric(as.factor(prediction.data$ID))
 
 #Effort per year
 effort <- nsites/mean(nsites) #MTF: should this be the median?
 
+#-Compile Data-#
 data.list <- list(n = obs.array, N = apply(obs.array, MARGIN = c(1,2), sum, na.rm = T))
                   
-con.list <- list(nspecies = length(sppcodes), nyears = nyears, nsites = nsites, nbasins = nbasins,
-                 basin = basin, area = area, effort = effort,
-                 hexagon = hexagon)
+con.list <- list(nspecies = length(sppcodes), nyears = nyears, nsites = nsites, nbasins = nbasins, nhex = nhex, nped = nped,
+                 basin = basin, area = area, effort = effort, hex.area = hex.area, mean.area = mean.area,
+                 hexagon = hexagon, basinhex = basinhex, basinpred = basinpred, hexpred = hexpred, PDO = PDO, 
+                 depth.site = depth.site, depth.hex = depth.hex, depth.pred = depth.pred, COS = COS, COS.hex = COS.hex)
 
 save(data.list, file = "./DataFormatting/FormattedData.Rds")
 save(con.list, file = "./DataFormatting/FormattedCon.Rds")
