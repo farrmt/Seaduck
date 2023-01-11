@@ -201,11 +201,17 @@ cowplot::plot_grid(Figure1A, Figure1B, Figure1C, ncol = 1, align = "v")
 
 Figure3 <- ggplot() +
   geom_sf(data = prediction.data) +
-  geom_sf(data = Ddata %>% filter(year >= 22), aes(fill = density), size = 0.01) + 
-  scale_fill_gradient(low = "white", high = "black") +
-  facet_wrap(. ~ year) +
-  theme_bw()
-  
+  geom_sf(data = Ddata, aes(fill = density), size = 0.01) + 
+  scale_fill_gradient(name = "Abundance", low = "white", high = "black") +
+  #facet_wrap(. ~ year) +
+  theme_bw() +
+  transition_states(year) +
+  labs(subtitle = "Year {next_state}")
+animate(Figure3)
+
+Figure3 + exit_shrink()
+
+anim_save(file = "PostAnalysis/map.gif")
 
 ggplot() +
   geom_sf(data = prediction.data) +
