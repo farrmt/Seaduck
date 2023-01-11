@@ -32,16 +32,12 @@ code <- nimbleCode({
     beta0[b] ~ dnorm(mu.beta, tau.beta)
   }
   
-  # beta0 ~ dnorm(0, 0.01)
-  
   beta1 ~ dnorm(0, 0.01) #Depth
   
   #Zero inflation parameter
   omega0 ~ dunif(0.001, 1)
   omega1 ~ dnorm(0, 0.01)
   omega2 ~ dnorm(0, 0.01)
-  # omega3 ~ dnorm(0, 0.01)
-  # omega4 ~ dnorm(0, 0.01)
     
   #LIKELIHOOD
     
@@ -86,13 +82,7 @@ code <- nimbleCode({
       z[t,h] ~ dbern(omega[t,h])
       logit(omega[t,h]) <- logit(omega0) +
                                  omega1 * z[t-1,h] + 
-                                 omega2 * depth.hex[h] #+
-                                 #omega3 * hex.area[t,h] + #should this be added
-                                 #omega4 * pred.lambda[t,h]
-      
-      # pred.lambda[t,h] <- exp(beta0[basinhex[h]] + 
-      #                           log(prod(gamma[1:(t-1)])) + 
-      #                           beta1 * depth.hex[h]) * COS.hex[h]
+                                 omega2 * depth.hex[h]
       
     }#end h
     
@@ -115,12 +105,7 @@ code <- nimbleCode({
 
     z[1,h] ~ dbern(omega[1,h])
     logit(omega[1,h]) <- logit(omega0) + 
-                         omega2 * depth.hex[h] #+
-                         #omega3 * hex.area[1,h] +
-                         #omega4 * pred.lambda[1,h]
-    
-    # pred.lambda[1,h] <- exp(beta0[basinhex[h]] + 
-    #                         beta1 * depth.hex[h]) * COS.hex[h]
+                         omega2 * depth.hex[h]
 
   }#end h
   
@@ -146,7 +131,7 @@ code <- nimbleCode({
 data <- list(n = data.list$n[11,,], N = data.list$N[11,])
 
 con <- list(nyears = con.list$nyears, nsites = con.list$nsites, nhex = con.list$nhex, nbasins = con.list$nbasins, npred = con.list$npred,
-            area = con.list$area, #hex.area = con.list$hex.area,
+            area = con.list$area,
             effort = con.list$effort, hexagon = con.list$hexagon,
             PDO = con.list$PDO[3:28], 
             depth.site = con.list$depth.site, depth.hex = con.list$depth.hex, depth.pred = con.list$depth.pred,
@@ -154,8 +139,6 @@ con <- list(nyears = con.list$nyears, nsites = con.list$nsites, nhex = con.list$
             basinhex = con.list$basinhex,
             basinpred = con.list$basinpred, 
             hexpred = con.list$hexpred, 
-            #COS = rep(100, con.list$npred)
-            #COS.hex = con.list$COS.hex)
             COS = con.list$COS)
 
 # data <- list(n = data.list$n[5,,], N = data.list$N[5,])
