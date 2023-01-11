@@ -1,4 +1,5 @@
 library(nimble)
+library(coda)
 
 #Logit function
 logit <- function(pp) 
@@ -12,14 +13,32 @@ expit <- function(eta)
   1/(1+exp(-eta))
 }
 
+#Generate miss ID rates
+missID.fun <- function(nspecies, nmissID)
+{
+  phi.pi <- matrix(0, ncol = nspecies, nrow = nspecies)
+  phi.pi[sample(x = 1:nspecies^2, size = nmissID)] <- runif(nmissID, 0, 0.25)
+  diag(phi.pi) <- runif(nspecies, 0.8, 1)
+  phi.pi <- phi.pi/apply(phi.pi, MARGIN = 1, sum)
+  return(phi.pi)
+}
+
+#Generate composition proportions
+comp.fun <- function(nspecies)
+{
+  pi <- runif(nspecies, 0, 1)
+  pi <- pi/sum(pi)
+  return(pi)
+}
+
 #Number of years
 nyears <- 10
 
 #Number of sites
-nsites <- 1000
+nsites <- 500
 
 #Number of species
-nspecies <- 4
+nspecies <- 5
 
 #Expected population growth rate intercept
 gamma0 <- log(runif(nspecies, 0.9, 1.1))
@@ -71,15 +90,14 @@ omega <- expit(logit(omega0) + omega1 * cov.use)
 z <- rbinom(n = nsites, size = 1, prob = omega)
 
 #Expected population abundance at the site-level
-beta <- lambda <- array(NA, dim = c(nspecies, nyears, nsites))
+lambda <- array(NA, dim = c(nspecies, nyears, nsites))
 
 #Expected population abundance intercept at the site-level
-beta0 <- log(LAMBDA/nsites)
+beta0 <- log(LAMBDA[,1]/sum(z))
 beta0.org <- beta0
 
 #Spatiotemporal covariate effects
 beta1 <- runif(nspecies, -1, 1)
-# beta1 <- rep(runif(1, -1, 1), nspecies)
 
 #Spatiotemporal covariate
 cov.st <- matrix(NA, nrow = nyears, ncol = nsites)
@@ -87,68 +105,85 @@ cov.st <- matrix(NA, nrow = nyears, ncol = nsites)
 for(t in 1:nyears){
   cov.st[t,1:nsites] <- rnorm(nsites, mean = 0, sd = 1)
   cov.st[t,1:nsites] <- scale(cov.st[t,1:nsites])
-  # cov.st[t,1:nsites] <- rlnorm(nsites, meanlog = 0, sdlog = 1)
 }
 
 #Proportion of total population abundance at a site
-pi <- array(NA, dim = c(nspecies, nyears, nsites))
+site.prob <- array(NA, dim = c(nspecies, nyears, nsites))
 
 #Latent site-level population abundance
 n <- array(NA, dim = c(nspecies, nyears, nsites))
 
 #Generate values for the above
 for(i in 1:nspecies){
+  lambda[i,1,1:nsites] <- z[1:nsites] * exp(beta0[i] + beta1[i] * cov.st[1,1:nsites])
+  lambda[i,1,1:nsites] <- lambda[i,1,1:nsites]/sum(lambda[i,1,1:nsites]) * LAMBDA[i,1]
+  site.prob[i,1,1:nsites] <- lambda[i,1,1:nsites]/LAMBDA[i,1]
+  n[i,1,1:nsites] <- rmultinom(1, N[i,1], site.prob[i,1,1:nsites])
   for(t in 1:nyears){
-    beta[i,t,1:nsites] <- exp(beta0[i,t] + beta1[i] * cov.st[t,1:nsites])
-    lambda[i,t,1:nsites] <- beta[i,t,1:nsites] * z[1:nsites]
+    lambda[i,t,1:nsites] <- z[1:nsites] * exp(beta0[i] + beta1[i] * cov.st[t,1:nsites] + log(prod(gamma[i,1:(t-1)])))
     lambda[i,t,1:nsites] <- lambda[i,t,1:nsites]/sum(lambda[i,t,1:nsites]) * LAMBDA[i,t]
-    pi[i,t,1:nsites] <- lambda[i,t,1:nsites]/LAMBDA[i,t]
-    n[i,t,1:nsites] <- rmultinom(1, N[i,t], pi[i,t,1:nsites])
-    beta0[i,t] <- mean(log(lambda[i,t,z==1]) - beta1[i] * cov.st[t,z==1])
+    site.prob[i,t,1:nsites] <- lambda[i,t,1:nsites]/LAMBDA[i,t]
+    n[i,t,1:nsites] <- rmultinom(1, N[i,t], site.prob[i,t,1:nsites])
   }
 }
 
+for(i in 1:nspecies){
+  beta0[i] <- mean(log(lambda[i,1,z==1]) - beta1[i] * cov.st[1,z==1])
+}
 
 #-Observation process-#
 
-#nreps <- 5
-
-# #Miss ID
-# psi <- 
-# 
 #Detection probability
-#p <- runif(1, 0.5, 1)
+p <- runif(1, 0, 1)
 
-# #Movement rate
-# movement <- runif(1, 0.5, 1)
-# 
+#Movement rate
+alpha <- runif(1, 0.5, 1)
+
+#Expected miss ID rate
+phi.pi <- missID.fun(nspecies, nmissID = 4)
+
 #Observed counts
-# y <- array(NA, dim = c(nspecies, nyears, nsites, nreps))
-# 
-# for(i in 1:nspecies){
-#   for(t in 1:nyears){
-#     for(j in 1:nsites){
-#       for(k in 1:nreps){
-#         y[i,t,j,k] <- rbinom(1, n[i,t,j], p)
-#       }#end k
-# 
-# #       n.avail[i,t,j] <- n[i,t,j] * movement
-# #       
-# #       confusion.matrix <- NULL
-# #       
-# #       for(k in 1:nspecies){
-# #         
-# #         confusion.matrix <- cbind(confusion.matrix, rmultinom(1, n.avail[i,t,j], phi.psi[i,]))
-# #         
-# #       }
-# #       
-# #       n.missID[i,t,j] <- apply(confusion.matrix, MARGIN = 1, sum)
-# #       
-#       #y[i,t,j] <- rbinom(1, n[i,t,j], p)
-# 
-#     }#end j
-#   }#end t
-# }#end i
+y <- array(NA, dim = c(nspecies, nyears, nsites))
+
+for(t in 1:nyears){
+  for(j in 1:nsites){
+    tmp <- NULL
+    for(i in 1:nspecies){
+        tmp <- cbind(tmp, rmultinom(1, n[i,t,j], phi.pi[i,]))
+    }#end i
+    y[,t,j] <- rbinom(n = nspecies, apply(tmp, MARGIN = 1, sum), prob = p * alpha)
+  }#end j
+}#end t
+
+#-Camera data-#
+
+#Number of camera replicates
+nreps <- 100
+
+#Community composition
+pi <- comp.fun(nspecies)
+
+#Community epected abundance
+THETA <- runif(1, 300, 1000)
+
+#Species expected abundance
+theta <- THETA * pi
+
+#Front facing and point of view camera data
+FF <- array(NA, dim = c(nspecies, nreps))
+
+#Observer data
+OBS <- array(NA, dim = c(nspecies, nreps, 2))
+
+for(k in 1:nreps){
+  FF[,k] <- rpois(nspecies, theta) 
+  tmp <- NULL 
+  for(i in 1:nspecies){
+    tmp <- cbind(tmp, rmultinom(1, FF[i,k], phi.pi[i,]))
+  }#end i
+  OBS[,k,1] <- rbinom(n = nspecies, apply(tmp, MARGIN = 1, sum), prob = p * alpha)
+  OBS[,k,2] <- rbinom(n = nspecies, apply(tmp, MARGIN = 1, sum), prob = p * alpha)
+}#end k
 
 
 #-Nimble Code-#
@@ -157,8 +192,6 @@ code <- nimbleCode({
   
   #PRIORS
   
-  #p ~ dunif(0, 1)
-  #p ~ dbeta(1, 1)
   omega0 ~ dbeta(1, 1)
   
   omega1~ dnorm(0, 0.01)
@@ -175,98 +208,101 @@ code <- nimbleCode({
     
     gamma0[i] ~ dnorm(0, 0.01)
     
-    beta0[i,1] ~ dnorm(0, 0.01)
+    #beta0[i,1] ~ dnorm(0, 0.01)
+    beta0[i] ~ dnorm(0, 0.01)
     
     beta1[i] ~ dnorm(0, 0.01)
     
     #LIKELIHOOD
-    # 
-    # for(k in 1:nreps){
-    #   Y[i,1,k] ~ dbin(p, N[i,1])
-    # }#end k
 
-    N[i,1] ~ dpois(LAMBDA[i,1])
+    Y[i,1] ~ dpois(LAMBDA[i,1] * correction[i])
     
     LAMBDA[i,1] <- sum(lambda[i,1,1:nsites])
     
     for(j in 1:nsites){
       
-      n[i,1,j] ~ dbin(pi[i,1,j], N[i,1])
+      y[i,1,j] ~ dbin(site.prob[i,1,j], Y[i,1])
       
-      pi[i,1,j] <- lambda[i,1,j]/LAMBDA[i,1]
+      site.prob[i,1,j] <- lambda[i,1,j]/LAMBDA[i,1]
       
-      lambda[i,1,j] <- beta[i,1,j] * z[j]
+      lambda[i,1,j] <- z[j] * exp(beta0[i] + beta1[i] * cov.st[1,j])
       
-      log(beta[i,1,j]) <- beta0[i,1] + beta1[i] * cov.st[1,j]
-      
-      # for(k in 1:nreps){
-      #   y[i,1,j,k] ~ dbin(p, n[i,1,j])
-      # }#end k
     }#end j
       
     for(t in 2:nyears){
       
-      beta0[i,t] ~ dnorm(0, 0.01)
-      
       log(gamma[i,t-1]) <- gamma0[i] + gamma1[i] * cov.t[t-1]
       
-      # for(k in 1:nreps){
-      #   Y[i,t,k] ~ dbin(p, N[i,t])
-      # }#end k
-      
-      N[i,t] ~ dpois(LAMBDA[i,t])
+      Y[i,t] ~ dpois(LAMBDA[i,t] * correction[i])
       
       LAMBDA[i,t] <- LAMBDA[i,t-1] * gamma[i,t-1]
       
-      # n[i,t,1:nsites] ~ dmulti(pi[i,t,1:nsites], N[i,t])
-      # 
-      # pi[i,t,1:nsites] <- lambda[i,t,1:nsites]/LAMBDA[i,t]
-      
       for(j in 1:nsites){
         
-        n[i,t,j] ~ dbin(pi[i,t,j], N[i,t])
+        y[i,t,j] ~ dbin(site.prob[i,t,j], Y[i,t])
         
-        pi[i,t,j] <- lambda[i,t,j]/LAMBDA[i,t]
+        site.prob[i,t,j] <- lambda[i,t,j]/LAMBDA[i,t]
         
-        lambda[i,t,j] <- beta[i,t,j] * z[j]
-        
-        log(beta[i,t,j]) <- beta0[i,t] + beta1[i] * cov.st[t,j]
-        
-        # for(k in 1:nreps){
-        #   y[i,t,j,k] ~ dbin(p, n[i,t,j])
-        # }
-
-        # y[i,t,j] ~ dpois(p * n[i,t,j])
+        lambda[i,t,j] <- z[j] * exp(beta0[i] + log(prod(gamma[i,1:(t-1)])) + beta1[i] * cov.st[t,j])
         
       }#end j
         
     }#end t
+    
+    pi[i] <- theta[i]/THETA
+    phi.ones[i] <- 1
+    
+    log(theta[i]) <- theta0[i]
+    theta0[i] ~ dnorm(0, 0.01)
+    
+    correction[i] <- epsilon.hat * phi[i]/pi[i]
       
   }#end i
+  
+  for(k in 1:nreps){
+    
+    FF[1:nspecies,k] ~ dmulti(pi[1:nspecies], FF.total[k])
+    
+    #Front facing camera total abundance
+    FF.total[k] ~ dpois(THETA)
+    
+    for(o in 1:nobs){
+      
+      OBS[1:nspecies,k,o] ~ dmulti(phi[1:nspecies], OBS.total[k,o])
+      
+      OBS.total[k,o] ~ dpois(THETA * epsilon.hat)
+      
+    }#end o
+    
+  }#end k
+  
+  #Composition of latent abundance (corrected for imperfect detection)
+  phi[1:nspecies] ~ ddirch(phi.ones[1:nspecies])
+  
+  #Derived product of movement and detection
+  epsilon.hat ~ dnorm(0, 0.01)
+  
+  #Community-wide expected abundance
+  THETA <- sum(theta[1:nspecies])
 
 })
       
 #-Compile data-#
 
-data <- list(#y = y,
-             #Y = apply(y, MARGIN = c(1,2,4), sum),
-             n = n,
-             N = N,
+data <- list(y = y,
+             Y = apply(y, c(1,2), sum),
              cov.t = cov.t,
              cov.st = cov.st,
-             cov.use = cov.use)
+             cov.use = cov.use,
+             FF = FF,
+             FF.total = apply(FF, 2, sum),
+             OBS = OBS,
+             OBS.total = apply(OBS, c(2,3), sum))
 
-constants <- list(nspecies = nspecies, nyears = nyears, nsites = nsites)
+constants <- list(nspecies = nspecies, nyears = nyears, nsites = nsites,
+                  nreps = nreps, nobs = 2)
 
 #-Initial values-#
-
-# beta0.fun <- function(){
-#   
-# }
-# 
-# gamma0.fun <-
-#   
-# gamma1.fun <-
 
 inits <- function(){list(
                          #n = apply(y + 1, MARGIN = c(1,2,3), max),
@@ -278,7 +314,9 @@ inits <- function(){list(
                          gamma1 = gamma1,
                          omega0 = omega0,
                          omega1 = omega1,
-                         z = z
+                         z = z,
+                         epsilon.hat = alpha*p,
+                         pi = pi
                          )}
 
 #-Parameters to save-#
@@ -288,13 +326,12 @@ params <- c(
   "beta1",
   "gamma0",
   "gamma1",
-  #"LAMBDA"
-  #"p"
   "omega0", 
-  "omega1"
+  "omega1",
+  "epsilon.hat",
+  "pi",
+  "phi"
 )
-
-params2 <- c("N")
 
 #-MCMC settings-#
 
@@ -313,12 +350,10 @@ nc <- 3
 ni <- 20000
 nb <- 10000
 nt <- 5
-nt2 <- 10
 
 #-Run model-#
 
-out1 <- runMCMC(compiled.model$MCMC,
+out <- runMCMC(compiled.model$MCMC,
                niter = ni, nburnin = nb,
-               nchains = nc, thin = nt, #thin2 = nt2,
+               nchains = nc, thin = nt,
                samplesAsCodaMCMC = TRUE)
-      
